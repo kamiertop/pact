@@ -115,30 +115,29 @@ uv run python -c "import torch, spconv.pytorch, HAIS_OP; print(torch.__version__
 
 ## Running Experiments
 
-### 1) Configuration file
-
-Please modify the dataset root and checkpoint save path in the config file:
+### Training
 
 ```bash
-configs/evisseg_evuav.yaml
+uv run python train.py --data_dir /path/to/ev-uav --gpu 0 \
+  --epochs 50 --seed 37 --model_save_root runs/pact_s37
 ```
 
-### 2) Training
+Training prints one line per epoch with mean batch loss, learning rate, and
+validation IoU. The same summary is written to
+`<model_save_root>/logs/<run-id>/metrics.jsonl`, after a record of the
+effective arguments. The best validation checkpoint is `best_iou_seed37.pt`
+for seed 37.
+
+### Testing
 
 ```bash
-uv run python train.py
+uv run python test.py --data_dir /path/to/ev-uav --gpu 0 --split test \
+  --model_path runs/pact_s37/best_iou_seed37.pt
 ```
 
-### 3) Testing
-
-```bash
-uv run python test.py
-```
-
-Training writes ordinary JSONL to
-`checkpoint/logs/<run-id>/metrics.jsonl` (under `model_save_root` if changed).
-Each run starts with its configuration and seed, followed by batch loss,
-learning rate, and per-epoch validation mIoU records. No tracking server is needed.
+Use `--split val` for validation. The default prediction threshold is 0.9.
+If training uses custom model or data settings such as `--width` or `--res`,
+pass the same settings when evaluating. Both scripts support `--help`.
 
 ## Checkpoints
 

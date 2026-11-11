@@ -1,20 +1,14 @@
 # -*- coding: utf-8 -*-
 import os
 import random
-import numpy as np
-import torch
-import torch.optim as optim
-from tqdm.auto import tqdm
-from utils.jsonl_logger import JsonlLogger
 
-from configs.configs import cfg
-from dataset.ev_uav import EvUAV
-from model.PACT import PACT
-from utils.stcloss import STCLoss
-from utils.eval import evalute
-from model.loss_utils import vel_loss_v1_only, build_p2v_map_for_level
+from utils.args import parse
+
 
 def setup(seed: int):
+    import numpy as np
+    import torch
+
     seed_n = seed
     print('random seed:' + str(seed_n))
     g = torch.Generator()
@@ -34,7 +28,20 @@ def setup(seed: int):
 
 if __name__ == '__main__':
     # --------- reproducibility ----------
-    seed = 37
+    cfg = parse("train")
+    if cfg.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = cfg.gpu
+    import torch
+    import torch.optim as optim
+
+    from dataset.ev_uav import EvUAV
+    from model.loss_utils import build_p2v_map_for_level, vel_loss_v1_only
+    from model.PACT import PACT
+    from utils.eval import evalute
+    from utils.jsonl_logger import JsonlLogger
+    from utils.stcloss import STCLoss
+
+    seed = cfg.seed
     setup(seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,18 +74,17 @@ if __name__ == '__main__':
     best_iou  = 0.0
 
     # --------- evaluator ----------
-    evaluter = evalute(cfg)
+    evaluter = evalute(cfg, roc=False)
 
     # One directory per run; each line is an independent JSON record.
     logger = JsonlLogger(cfg.model_save_root, vars(cfg), seed)
     print(f"Training metrics: {logger.path}")
 
     for epoch in range(cfg.epochs):
+        lr = optimizer.param_groups[0]["lr"]
+        loss_total = 0.0
         net.train()
-        pbar = tqdm(total=len(train_loader), unit="Batch", unit_scale=True,
-                    desc=f"Epoch: {epoch}", position=0, leave=True)
-
-        for batch_idx, batch in enumerate(train_loader):
+        for batch in train_loader:
             # ---- inputs ----
             x = batch['voxel_ev']
             label = batch['seg_label_ev'].float().to(device)
@@ -106,12 +112,13 @@ if __name__ == '__main__':
             loss_task = stc_criterion(voxel, p2v_map_ev, preds, seg_label_ev.float())
 
             # v1 速度监督（事件级 → v1 体素）
-            loss_v1, logs_v1 = vel_loss_v1_only(
+            loss_v1 = vel_loss_v1_only(
                 v1=v1,
                 idx_v1=idx_v1,
                 batch={'ev_bxyt': ev_bxyt, 'seg_label': seg_label_ev},
                 p2v_map_v1=p2v_v1,
-                huber_delta=0.5
+                huber_delta=0.5,
+                return_logs=False,
             )
 
             loss = loss_task + 0.3 * loss_v1
@@ -120,29 +127,16 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
 
-            # ---- logs ----
-            pbar.set_postfix(loss=float(loss), task=float(loss_task))
-            pbar.update(1)
-
-            with torch.no_grad():
-                logger.log(
-                    "train", epoch=epoch, batch=batch_idx,
-                    step=epoch * len(train_loader) + batch_idx,
-                    loss=float(loss), loss_task=float(loss_task),
-                    loss_v1=float(loss_v1), lr=optimizer.param_groups[0]['lr'],
-                )
-
-                if float(loss) < best_loss:
-                    best_path = os.path.join(cfg.model_save_root, f'best_loss_seed{seed}.pt')
-                    os.makedirs(cfg.model_save_root, exist_ok=True)
-                    torch.save(net.state_dict(), best_path)
-                    best_loss = float(loss)
-
+            batch_loss = loss.detach().item()
+            loss_total += batch_loss
+            if batch_loss < best_loss:
+                best_path = os.path.join(cfg.model_save_root, f"best_loss_seed{seed}.pt")
+                torch.save(net.state_dict(), best_path)
+                best_loss = batch_loss
 
             # 释放显存碎片
             del preds, voxel
 
-        pbar.close()
         scheduler.step()
 
         # ---------------- 验证（保持你原有逻辑） ----------------
@@ -175,22 +169,18 @@ if __name__ == '__main__':
                 del preds_val, voxel_val, x_val
                 torch.cuda.empty_cache()
 
-            # 计算 mIoU
-            iou = evaluter.evaluate_semantic_segmantation_miou()
-            logger.log("val", epoch=epoch, val_mIoU=float(iou))
+        iou = float(evaluter.evaluate_semantic_segmantation_miou(cfg.prediction_thresh))
+        if iou >= best_iou:
+            best_iou = iou
+            iou_path = os.path.join(cfg.model_save_root, f"best_iou_seed{seed}.pt")
+            torch.save(net.state_dict(), iou_path)
 
-            if float(iou) >= best_iou:
-                best_iou = float(iou)
-                iou_path = os.path.join(cfg.model_save_root, f'best_iou_seed{seed}.pt')
-                os.makedirs(cfg.model_save_root, exist_ok=True)
-                torch.save(net.state_dict(), iou_path)
-            print(f"[Val] New best mIoU: {best_iou:.4f}. Iou: {float(iou):.4f}. Saved to {iou_path}")
-            epoch_save_path = os.path.join(cfg.model_save_root, f'epoch_{epoch}_seed{seed}.pt')
+        epoch_save_path = os.path.join(cfg.model_save_root, f"epoch_{epoch}_seed{seed}.pt")
+        torch.save(net.state_dict(), epoch_save_path)
+        torch.cuda.empty_cache()
 
-            # 确保目录存在
-            os.makedirs(cfg.model_save_root, exist_ok=True)
-
-            # 保存权重
-            torch.save(net.state_dict(), epoch_save_path)
-            print(f"Checkpoints saved to {epoch_save_path}")
-            torch.cuda.empty_cache()
+        mean_loss = loss_total / len(train_loader)
+        logger.log("epoch", epoch=epoch, loss=mean_loss, lr=lr,
+                   val_mIoU=iou, best_val_mIoU=best_iou)
+        print(f"Epoch {epoch + 1}/{cfg.epochs} | loss={mean_loss:.6f} | "
+              f"lr={lr:.3g} | val IoU={iou:.4f} | best IoU={best_iou:.4f}", flush=True)

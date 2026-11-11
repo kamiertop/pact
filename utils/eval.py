@@ -3,15 +3,14 @@ import torch
 import cv2
 import numpy as np
 import pandas as pd
-import tqdm
 
 
 class evalute():
-    def __init__(self, cfg):
+    def __init__(self, cfg, *, roc):
         self.matches = {}
         self.data = pd.DataFrame()
 
-        if cfg.roc:
+        if roc:
             self.pd_detT = cfg.pd_detT
             self.correct_thresh = cfg.correct_thresh
             self.whole_ev_num = 0  # 总共的事件点的数量

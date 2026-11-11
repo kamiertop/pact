@@ -1437,10 +1437,8 @@ dependencies = [
     { name = "opencv-python-headless" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.5", source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "pyyaml" },
     { name = "spconv-cu126" },
     { name = "torch" },
-    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -1463,10 +1461,8 @@ requires-dist = [
     { name = "open3d", marker = "extra == 'vis'", specifier = ">=0.19.0" },
     { name = "opencv-python-headless", specifier = ">=4.11.0.86" },
     { name = "pandas", specifier = ">=2.3.3" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "spconv-cu126", specifier = ">=2.3.8" },
     { name = "torch", specifier = ">=2.13.0,<2.14", index = "https://download.pytorch.org/whl/cu126" },
-    { name = "tqdm", specifier = ">=4.67.0" },
 ]
 provides-extras = ["vis"]
 

@@ -1,5 +1,4 @@
 import os
-from configs.configs import cfg
 import torch
 import numpy as np
 from dataset.basedataset import BaseDataLoader
@@ -19,13 +18,12 @@ class EvUAV(BaseDataLoader):
 
         if self.mode=='train':
             num_events = ev_loc.shape[0]
-            if num_events >= cfg.max_events_num:
-                dowmsample_idx = np.random.choice(num_events,cfg.max_events_num,replace=False)
+            if num_events >= self.configs.max_events_num:
+                dowmsample_idx = np.random.choice(num_events,self.configs.max_events_num,replace=False)
                 ev_loc = ev_loc[dowmsample_idx]
                 evs_norm=evs_norm[dowmsample_idx]
                 seg_label = seg_label[dowmsample_idx]
                 idx = idx[dowmsample_idx]
-                print('downsample')
 
         out = {}
         out['ev_loc'] = ev_loc  # [Ne,3] = [x,y,t]

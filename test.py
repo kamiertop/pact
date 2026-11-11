@@ -1,60 +1,46 @@
-import torch
-from configs.configs import cfg
-from dataset.ev_uav import EvUAV
-from model.PACT import PACT
-from utils.eval import evalute
-import tqdm
+import os
+
+from utils.args import parse
 
 
-if __name__ == '__main__':
-    device = "cuda:0"
+if __name__ == "__main__":
+    cfg = parse("test")
+    if cfg.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = cfg.gpu
 
-    net = PACT(cfg).eval()
+    import torch
 
-    torch.set_grad_enabled(False)
-    net.cuda()
+    from dataset.ev_uav import EvUAV
+    from model.PACT import PACT
+    from utils.eval import evalute
 
-    dataset = EvUAV(cfg, mode='test')
-
-    test_dataloader = torch.utils.data.DataLoader(dataset, batch_size=cfg.batch_size,collate_fn=dataset.custom_collate)
-
+    net = PACT(cfg).eval().cuda()
     net.load_state_dict(torch.load(cfg.model_path))
-    print('dict load: ',cfg.model_path)
+    print(f"Loaded checkpoint: {cfg.model_path}")
 
-
-    pbar = tqdm.tqdm(total=len(test_dataloader), desc='video', unit='video',unit_scale=True,position=0, leave=True)
-
-    evaluter = evalute(cfg)
-
-    for sample,ev in enumerate(test_dataloader):
-        with torch.no_grad():
-            x = ev['voxel_ev']
-            label = ev['seg_label_ev'].float().cuda()
-            p2v_map = ev['p2v_map'].long().cuda()
-            ev_locs = ev['locs'].float().requires_grad_()
-            idx = ev['idx_label']
-            ts = ev_locs[:,3]
-
-            preds, voxel, v1, idx_v1 = net(x)
-
-            ev_bxyt = torch.as_tensor(ev['locs'], device=device).long()  # [N_ev,4] = [b,x,y,t]，原始分辨率
-            seg_ev = ev['seg_label_ev'].to(device).long()  # [N_ev]
-
+    dataset = EvUAV(cfg, mode=cfg.split)
+    loader = torch.utils.data.DataLoader(
+        dataset, batch_size=cfg.batch_size, collate_fn=dataset.custom_collate,
+    )
+    evaluator = evalute(cfg, roc=cfg.roc)
+    with torch.no_grad():
+        for sample, events in enumerate(loader):
+            preds, _, _, _ = net(events["voxel_ev"])
+            p2v_map = events["p2v_map"].long().cuda()
             preds = preds[p2v_map].squeeze().cpu()
+            labels = events["seg_label_ev"].float().cpu()
+            evaluator.matches[str(sample)] = {"seg_pred": preds, "seg_gt": labels}
+            if cfg.roc:
+                locs = events["locs"].float()
+                evaluator.roc_update(
+                    locs[:, 3], preds, events["idx_label"], labels, locs,
+                    thresh=cfg.prediction_thresh,
+                )
 
-            if cfg.eval:
-                preds_cpu = preds.detach().cpu()
-                label_cpu = label.detach().cpu()
-                evaluter.matches[str(sample)] = {}
-                evaluter.matches[str(sample)]['seg_pred']= preds_cpu
-                evaluter.matches[str(sample)]['seg_gt'] = label_cpu
-                if cfg.roc:
-                    evaluter.roc_update(ts,preds,idx,label.cpu(),ev_locs)
-        pbar.update(1)
-
-    if cfg.eval:
-        iou = evaluter.evaluate_semantic_segmantation_miou()
-        seg_acc = evaluter.evaluate_semantic_segmantation_accuracy()
-        if cfg.roc:
-            pd, fa= evaluter.cal_roc()
-        print('iou:{},seg_acc:{},pd:{},fa:{}'.format(iou,seg_acc,pd,fa))
+    iou = evaluator.evaluate_semantic_segmantation_miou(cfg.prediction_thresh)
+    acc = evaluator.evaluate_semantic_segmantation_accuracy(cfg.prediction_thresh)
+    result = f"iou:{iou},seg_acc:{acc}"
+    if cfg.roc:
+        pd, fa = evaluator.cal_roc()
+        result += f",pd:{pd},fa:{fa}"
+    print(result)

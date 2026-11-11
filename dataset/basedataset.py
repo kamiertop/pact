@@ -75,7 +75,7 @@ class BaseDataLoader(torch.utils.data.Dataset):
 
     def __init__(self, configs):
         self.configs = configs
-        self.root = configs.root
+        self.root = configs.data_dir
         self.whole_t = configs.whole_t
         self.res = configs.res
 
