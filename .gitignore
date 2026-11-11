@@ -84,3 +84,6 @@ $RECYCLE.BIN/
 checkpoint/
 mlruns/
 mlartifacts/
+
+# Local experiment runs
+/runs/

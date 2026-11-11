@@ -38,7 +38,7 @@ if __name__ == '__main__':
     from model.loss_utils import build_p2v_map_for_level, vel_loss_v1_only
     from model.PACT import PACT
     from utils.eval import evalute
-    from utils.jsonl_logger import JsonlLogger
+    from utils.run_manager import RunManager
     from utils.stcloss import STCLoss
 
     seed = cfg.seed
@@ -71,20 +71,19 @@ if __name__ == '__main__':
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
     best_loss = float("inf")
-    best_iou  = 0.0
+    best_iou = float("-inf")
 
     # --------- evaluator ----------
     evaluter = evalute(cfg, roc=False)
 
-    # One directory per run; each line is an independent JSON record.
-    logger = JsonlLogger(cfg.model_save_root, vars(cfg), seed)
-    print(f"Training metrics: {logger.path}")
+    run = RunManager(cfg.run_root, cfg.run_name, cfg)
+    print(f"Run directory: {run.run_dir}", flush=True)
 
     for epoch in range(cfg.epochs):
         lr = optimizer.param_groups[0]["lr"]
         loss_total = 0.0
         net.train()
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             # ---- inputs ----
             x = batch['voxel_ev']
             label = batch['seg_label_ev'].float().to(device)
@@ -129,14 +128,16 @@ if __name__ == '__main__':
 
             batch_loss = loss.detach().item()
             loss_total += batch_loss
-            if batch_loss < best_loss:
-                best_path = os.path.join(cfg.model_save_root, f"best_loss_seed{seed}.pt")
-                torch.save(net.state_dict(), best_path)
-                best_loss = batch_loss
+            run.log_metric(epoch, batch_idx, loss=batch_loss, lr=lr,
+                           loss_task=loss_task.detach().item(), loss_v1=loss_v1.detach().item())
 
             # 释放显存碎片
             del preds, voxel
 
+        mean_loss = loss_total / len(train_loader)
+        if mean_loss < best_loss:
+            best_loss = mean_loss
+            run.save_checkpoint(net, f"best_loss_seed{seed}.pt")
         scheduler.step()
 
         # ---------------- 验证（保持你原有逻辑） ----------------
@@ -170,17 +171,10 @@ if __name__ == '__main__':
                 torch.cuda.empty_cache()
 
         iou = float(evaluter.evaluate_semantic_segmantation_miou(cfg.prediction_thresh))
-        if iou >= best_iou:
+        if iou > best_iou:
             best_iou = iou
-            iou_path = os.path.join(cfg.model_save_root, f"best_iou_seed{seed}.pt")
-            torch.save(net.state_dict(), iou_path)
+            run.save_checkpoint(net, f"best_iou_seed{seed}.pt")
 
-        epoch_save_path = os.path.join(cfg.model_save_root, f"epoch_{epoch}_seed{seed}.pt")
-        torch.save(net.state_dict(), epoch_save_path)
-        torch.cuda.empty_cache()
-
-        mean_loss = loss_total / len(train_loader)
-        logger.log("epoch", epoch=epoch, loss=mean_loss, lr=lr,
-                   val_mIoU=iou, best_val_mIoU=best_iou)
+        run.log_metric(epoch, loss=mean_loss, lr=lr, val_mIoU=iou, best_val_mIoU=best_iou)
         print(f"Epoch {epoch + 1}/{cfg.epochs} | loss={mean_loss:.6f} | "
               f"lr={lr:.3g} | val IoU={iou:.4f} | best IoU={best_iou:.4f}", flush=True)

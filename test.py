@@ -15,8 +15,8 @@ if __name__ == "__main__":
     from utils.eval import evalute
 
     net = PACT(cfg).eval().cuda()
-    net.load_state_dict(torch.load(cfg.model_path))
-    print(f"Loaded checkpoint: {cfg.model_path}")
+    net.load_state_dict(torch.load(cfg.checkpoint_path))
+    print(f"Loaded checkpoint: {cfg.checkpoint_path}")
 
     dataset = EvUAV(cfg, mode=cfg.split)
     loader = torch.utils.data.DataLoader(

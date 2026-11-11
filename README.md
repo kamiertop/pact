@@ -118,26 +118,27 @@ uv run python -c "import torch, spconv.pytorch, HAIS_OP; print(torch.__version__
 ### Training
 
 ```bash
-uv run python train.py --data_dir /path/to/ev-uav --gpu 0 \
-  --epochs 50 --seed 37 --model_save_root runs/pact_s37
+uv run python train.py --data_dir /path/to/ev-uav --gpu 0 --run_name pact_s37
 ```
 
-Training prints one line per epoch with mean batch loss, learning rate, and
-validation IoU. The same summary is written to
-`<model_save_root>/logs/<run-id>/metrics.jsonl`, after a record of the
-effective arguments. The best validation checkpoint is `best_iou_seed37.pt`
-for seed 37.
+Each training run gets its own `runs/train_<name>_<timestamp>/` directory:
+`config.json` records the effective arguments, `metrics.jsonl` records batch
+and epoch metrics, and `checkpoints/` holds the best mean training loss and
+best validation IoU weights. Use `--run_root` to change the output root.
 
 ### Testing
 
 ```bash
-uv run python test.py --data_dir /path/to/ev-uav --gpu 0 --split test \
-  --model_path runs/pact_s37/best_iou_seed37.pt
+# Evaluate the newest run that has a best-IoU checkpoint
+uv run python test.py --gpu 0
+
+# Select a particular run instead
+uv run python test.py --gpu 0 --run_dir runs/train_pact_s37_<timestamp>
 ```
 
-Use `--split val` for validation. The default prediction threshold is 0.9.
-If training uses custom model or data settings such as `--width` or `--res`,
-pass the same settings when evaluating. Both scripts support `--help`.
+Testing reuses the run's model and data settings from `config.json`. Explicit
+arguments (such as `--data_dir`) override those settings. Use `--split val` for
+validation.
 
 ## Checkpoints
 

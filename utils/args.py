@@ -1,6 +1,10 @@
 """Command-line options shared by PACT training and evaluation."""
 
 import argparse
+import json
+from pathlib import Path
+
+from utils.run_manager import resolve_checkpoint
 
 
 def parse(mode):
@@ -18,6 +22,7 @@ def parse(mode):
                         metavar=("WIDTH", "HEIGHT"))
     parser.add_argument("--width", type=int, default=12)
     parser.add_argument("--prediction_thresh", type=float, default=0.9)
+    parser.add_argument("--run_root", default="runs", help="root directory for training runs")
     if mode == "train":
         parser.add_argument("--seed", type=int, default=37)
         parser.add_argument("--epochs", type=int, default=50)
@@ -25,16 +30,31 @@ def parse(mode):
         parser.add_argument("--k", type=int, default=3)
         parser.add_argument("--t", type=int, default=5)
         parser.add_argument("--max_events_num", type=int, default=100000)
-        parser.add_argument("--model_save_root", default="checkpoint",
-                            help="directory for checkpoints and training metrics")
+        parser.add_argument("--run_name", default="experiment", help="label for this training run")
     else:
-        parser.add_argument("--model_path", required=True, help="checkpoint file")
+        parser.add_argument("--run_dir", help="use this run's best validation IoU checkpoint")
         parser.add_argument("--split", choices=("val", "test"), default="test")
         parser.add_argument("--pd_detT", type=int, default=50, help="Pd/Fa window in ms")
         parser.add_argument("--correct_thresh", type=float, default=0.0001)
         parser.add_argument("--roc", action=argparse.BooleanOptionalAction, default=True,
                             help="compute Pd and Fa")
     cfg = parser.parse_args()
+    if mode == "train" and (not cfg.run_name or Path(cfg.run_name).name != cfg.run_name
+                            or cfg.run_name in {".", ".."}):
+        parser.error("--run_name must be a single directory name")
+    if mode == "test":
+        try:
+            checkpoint = resolve_checkpoint(cfg.run_root, cfg.run_dir)
+            config_path = checkpoint.parent.parent / "config.json"
+            if checkpoint.parent.name == "checkpoints" and config_path.is_file():
+                saved = json.loads(config_path.read_text(encoding="utf-8"))
+                shared = ("data_dir", "batch_size", "input_channel", "whole_t",
+                          "res", "width", "prediction_thresh")
+                parser.set_defaults(**{k: saved[k] for k in shared if k in saved})
+                cfg = parser.parse_args()
+            cfg.checkpoint_path = checkpoint
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
     if not 0 <= cfg.prediction_thresh <= 1:
         parser.error("--prediction_thresh must be between 0 and 1")
     return cfg
