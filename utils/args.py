@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from utils.run_manager import resolve_checkpoint
@@ -30,6 +31,16 @@ def parse(mode):
         parser.add_argument("--k", type=int, default=3)
         parser.add_argument("--t", type=int, default=5)
         parser.add_argument("--max_events_num", type=int, default=100000)
+        parser.add_argument("--risk_weight", type=float, default=0.0,
+                            help="R1 foreground event BCE weight")
+        parser.add_argument("--iou_weight", type=float, default=0.0,
+                            help="event Soft Jaccard weight")
+        parser.add_argument("--hardneg_weight", type=float, default=0.0,
+                            help="hard background BCE weight")
+        parser.add_argument("--hardneg_ratio", type=float, default=3.0,
+                            help="hard background events per foreground event")
+        parser.add_argument("--hardneg_min", type=int, default=256,
+                            help="minimum hard background quota per sample")
         parser.add_argument("--run_name", default="experiment", help="label for this training run")
     else:
         parser.add_argument("--run_dir", help="use this run's best validation IoU checkpoint")
@@ -42,6 +53,15 @@ def parse(mode):
     if mode == "train" and (not cfg.run_name or Path(cfg.run_name).name != cfg.run_name
                             or cfg.run_name in {".", ".."}):
         parser.error("--run_name must be a single directory name")
+    if mode == "train":
+        for name in ("risk_weight", "iou_weight", "hardneg_weight"):
+            weight = getattr(cfg, name)
+            if not math.isfinite(weight) or weight < 0:
+                parser.error(f"--{name} must be finite and nonnegative")
+        if not math.isfinite(cfg.hardneg_ratio) or cfg.hardneg_ratio <= 0:
+            parser.error("--hardneg_ratio must be finite and positive")
+        if cfg.hardneg_min < 1:
+            parser.error("--hardneg_min must be positive")
     if mode == "test":
         try:
             checkpoint = resolve_checkpoint(cfg.run_root, cfg.run_dir)

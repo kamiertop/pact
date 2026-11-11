@@ -602,7 +602,7 @@ class PACT(nn.Module):
         x = conv_inv(x)
         return x
 
-    def forward(self, input):
+    def forward(self, input, *, return_logits=False):
         # ===== 编码器 =====
         x = self.conv_input(input)
         x_1 = self.SCA1(x)           # level-1
@@ -642,7 +642,10 @@ class PACT(nn.Module):
         x_up2 = self.align2(x_up2, v1)   # 上采样到 level-1，用 v1 对齐
         x_up1 = self.ACRBlock(x_1, x_up2, self.mlp1, self.channel_att1, self.conv5)
 
-        output = self.semantic_linear(x_up1.features)
+        logits = self.semantic_linear[0](x_up1.features)
+        output = self.semantic_linear[1](logits)
         voxel = x_up1.replace_feature(output)
 
+        if return_logits:
+            return output, voxel, v1, idx_v1, logits
         return output, voxel, v1, idx_v1

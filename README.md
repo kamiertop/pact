@@ -126,6 +126,43 @@ Each training run gets its own `runs/train_<name>_<timestamp>/` directory:
 and epoch metrics, and `checkpoints/` holds the best mean training loss and
 best validation IoU weights. Use `--run_root` to change the output root.
 
+### R1 auxiliary losses
+
+PACT can add three event-level losses to its STC and velocity supervision.
+Each weight defaults to zero. Set the EV-UAV reference values with:
+
+```bash
+uv run python train.py --data_dir /path/to/ev-uav --gpu 0 --run_name pact_r1 +  --risk_weight 0.1 --iou_weight 0.1 --hardneg_weight 0.03 +  --hardneg_ratio 3 --hardneg_min 256
+```
+
+- `risk_weight` controls R1 foreground BCE on events with positive instance IDs.
+- `iou_weight` controls event Soft Jaccard. Samples without foreground use background BCE.
+- `hardneg_weight` controls BCE on the highest-scoring ground-truth background
+  events. The per-sample quota is the larger of `hardneg_min` and
+  `ceil(hardneg_ratio * foreground_events)`, capped by the background event count.
+
+Run the staged search from the project root:
+
+```bash
+uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0 --dry_run
+uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0
+```
+
+The default search screens 27 weight combinations for 15 epochs, then varies
+the mining ratio and minimum quota for the two highest-ranking configurations
+with hard-background BCE enabled. It trains the native PACT baseline, the
+EV-UAV reference weights, and the two highest-ranking remaining settings for
+50 epochs each with seeds 37, 42 and 73. All stages use PACT's optimizer and
+schedule and rank on validation IoU at threshold 0.9 by default.
+
+Use `--stage weights` to run just the weight grid or `--stage mining` to finish
+screening. Rerunning the same command reuses completed trials with available
+checkpoints. Use a fresh `--run_root` when changing the training code or dataset
+contents. `screening.json` lists ranked screening runs, and
+`confirmation.json` records the mean and sample standard deviation across
+seeds, with checkpoint and run paths. The sweep uses the train and validation
+splits. After choosing a setting, pass its run directory to `test.py`.
+
 ### Testing
 
 ```bash
