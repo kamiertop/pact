@@ -123,7 +123,8 @@ uv run python train.py --data_dir /path/to/ev-uav --gpu 0 --run_name pact_s37
 
 Each training run gets its own `runs/train_<name>_<timestamp>/` directory:
 `config.json` records the effective arguments, `metrics.jsonl` records batch
-and epoch metrics, and `checkpoints/` holds the best mean training loss and
+and epoch metrics, including `epoch_seconds` for training, validation, and
+checkpoint writes. `checkpoints/` holds the best mean training loss and
 best validation IoU weights. Use `--run_root` to change the output root.
 
 ### R1 auxiliary losses
@@ -148,9 +149,11 @@ uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0 --dry_run
 uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0
 ```
 
-The default search screens 27 weight combinations for 15 epochs, then varies
+The default search screens 27 weight combinations for 50 epochs each, then varies
 the mining ratio and minimum quota for the two highest-ranking configurations
-with hard-background BCE enabled. It trains the native PACT baseline, the
+with hard-background BCE enabled, also for 50 epochs each. The sweep prints
+one line per epoch, including elapsed time, and saves full output to each
+trial's `train.log`. It trains the native PACT baseline, the
 EV-UAV reference weights, and the two highest-ranking remaining settings for
 50 epochs each with seeds 37, 42 and 73. All stages use PACT's optimizer and
 schedule and rank on validation IoU at threshold 0.9 by default.
@@ -160,8 +163,12 @@ screening. Rerunning the same command reuses completed trials with available
 checkpoints. Use a fresh `--run_root` when changing the training code or dataset
 contents. `screening.json` lists ranked screening runs, and
 `confirmation.json` records the mean and sample standard deviation across
-seeds, with checkpoint and run paths. The sweep uses the train and validation
-splits. After choosing a setting, pass its run directory to `test.py`.
+seeds, with checkpoint and run paths. After confirmation, the sweep selects
+the setting with the highest mean validation IoU and tests all its seed
+checkpoints. It evaluates one sample at a time so Pd and Fa use sample-local
+timestamps and instance IDs. `test_summary.json` records each seed's test
+metrics and their mean and sample standard deviation. Pass
+`--no-test_after_train` to finish after validation.
 
 ### Testing
 

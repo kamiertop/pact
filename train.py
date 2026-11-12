@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import random
+from time import perf_counter
 
 from utils.args import parse
 
@@ -82,6 +83,7 @@ if __name__ == '__main__':
     print(f"Run directory: {run.run_dir}", flush=True)
 
     for epoch in range(cfg.epochs):
+        epoch_started = perf_counter()
         lr = optimizer.param_groups[0]["lr"]
         loss_total = 0.0
         net.train()
@@ -187,6 +189,11 @@ if __name__ == '__main__':
             best_iou = iou
             run.save_checkpoint(net, f"best_iou_seed{seed}.pt")
 
-        run.log_metric(epoch, loss=mean_loss, lr=lr, val_mIoU=iou, best_val_mIoU=best_iou)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        epoch_seconds = perf_counter() - epoch_started
+        run.log_metric(epoch, loss=mean_loss, lr=lr, val_mIoU=iou,
+                       best_val_mIoU=best_iou, epoch_seconds=epoch_seconds)
         print(f"Epoch {epoch + 1}/{cfg.epochs} | loss={mean_loss:.6f} | "
-              f"lr={lr:.3g} | val IoU={iou:.4f} | best IoU={best_iou:.4f}", flush=True)
+              f"lr={lr:.3g} | val IoU={iou:.4f} | best IoU={best_iou:.4f} | "
+              f"time={epoch_seconds:.2f}s", flush=True)

@@ -1,3 +1,4 @@
+import json
 import os
 
 from utils.args import parse
@@ -27,7 +28,7 @@ if __name__ == "__main__":
         for sample, events in enumerate(loader):
             preds, _, _, _ = net(events["voxel_ev"])
             p2v_map = events["p2v_map"].long().cuda()
-            preds = preds[p2v_map].squeeze().cpu()
+            preds = preds[p2v_map].reshape(-1).cpu()
             labels = events["seg_label_ev"].float().cpu()
             evaluator.matches[str(sample)] = {"seg_pred": preds, "seg_gt": labels}
             if cfg.roc:
@@ -39,8 +40,11 @@ if __name__ == "__main__":
 
     iou = evaluator.evaluate_semantic_segmantation_miou(cfg.prediction_thresh)
     acc = evaluator.evaluate_semantic_segmantation_accuracy(cfg.prediction_thresh)
-    result = f"iou:{iou},seg_acc:{acc}"
+    metrics = {"iou": float(iou), "seg_acc": float(acc)}
     if cfg.roc:
         pd, fa = evaluator.cal_roc()
-        result += f",pd:{pd},fa:{fa}"
-    print(result)
+        metrics.update(pd=float(pd), fa=float(fa))
+    if cfg.output_json is not None:
+        cfg.output_json.write_text(json.dumps(metrics, indent=2, allow_nan=False) + "\n",
+                                   encoding="utf-8")
+    print(",".join(f"{name}:{value}" for name, value in metrics.items()))

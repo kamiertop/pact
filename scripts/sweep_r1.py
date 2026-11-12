@@ -1,4 +1,4 @@
-"""Screen R1 loss settings on validation IoU, then repeat finalists across seeds."""
+"""Screen R1 settings, repeat finalists across seeds, and test the validation winner."""
 
 import argparse
 import hashlib
@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument("--max_events_num", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--prediction_thresh", type=float, default=0.9)
-    parser.add_argument("--screen_epochs", type=int, default=15)
+    parser.add_argument("--screen_epochs", type=int, default=50)
     parser.add_argument("--final_epochs", type=int, default=50)
     parser.add_argument("--screen_seed", type=int, default=37)
     parser.add_argument("--final_seeds", nargs="+", type=int, default=[37, 42, 73])
@@ -40,6 +40,8 @@ def parse_args():
                         help="additional finalists beyond baseline and EV-UAV settings")
     parser.add_argument("--stage", choices=("weights", "mining", "all"), default="all",
                         help="last stage to run")
+    parser.add_argument("--test_after_train", action=argparse.BooleanOptionalAction, default=True,
+                        help="test every seed of the validation winner after confirmation")
     parser.add_argument("--dry_run", action="store_true")
     args = parser.parse_args()
     if min(args.screen_epochs, args.final_epochs, args.batch_size, args.max_events_num) < 1:
@@ -93,10 +95,17 @@ def run_trial(args, phase, params, epochs, seed):
     previous_runs = set(directory.glob("train_*"))
     print(f"{phase} | seed={seed} | {config} | {directory}", flush=True)
     log = directory / "train.log"
-    with log.open("a", encoding="utf-8") as stream:
-        process = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT)
-    if process.returncode:
-        raise SystemExit(f"Training exited with code {process.returncode}. See {log}")
+    with log.open("a", encoding="utf-8", buffering=1) as stream, subprocess.Popen(
+        command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    ) as process:
+        for line in process.stdout:
+            stream.write(line)
+            if line.startswith("Epoch "):
+                print(line, end="", flush=True)
+        returncode = process.wait()
+    if returncode:
+        raise SystemExit(f"Training exited with code {returncode}. See {log}")
 
     run_dirs = set(directory.glob("train_*")) - previous_runs
     if len(run_dirs) != 1:
@@ -120,6 +129,48 @@ def run_trial(args, phase, params, epochs, seed):
     return result
 
 
+def test_winner(args, winner):
+    metric_names = ("iou", "seg_acc", "pd", "fa")
+    test_runs = []
+    for run in winner["runs"]:
+        run_dir = Path(run["run_dir"])
+        metrics_path = run_dir / "test_metrics.json"
+        log = run_dir / "test.log"
+        # Pd/Fa uses sample-local timestamps and instance IDs.
+        command = [
+            sys.executable, "-u", str(ROOT / "test.py"), "--split", "test",
+            "--run_dir", str(run_dir), "--data_dir", str(args.data_dir.resolve()),
+            "--batch_size", "1", "--prediction_thresh", str(args.prediction_thresh),
+            "--output_json", str(metrics_path),
+        ]
+        if args.gpu is not None:
+            command.extend(("--gpu", args.gpu))
+        print(f"test | seed={run['seed']} | {run_dir}", flush=True)
+        with log.open("w", encoding="utf-8") as stream:
+            process = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT)
+        if process.returncode:
+            raise SystemExit(f"Testing exited with code {process.returncode}. See {log}")
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        test_runs.append({**run, "test_metrics": metrics})
+        print("  " + " | ".join(f"{key}={metrics[key]:.6g}" for key in metric_names), flush=True)
+
+    mean_metrics = {}
+    std_metrics = {}
+    for name in metric_names:
+        scores = [run["test_metrics"][name] for run in test_runs]
+        mean_metrics[name] = mean(scores)
+        std_metrics[name] = stdev(scores) if len(scores) > 1 else None
+    result_path = args.run_root / "test_summary.json"
+    write_json(result_path, {
+        **winner, "runs": test_runs, "prediction_thresh": args.prediction_thresh,
+        "mean_test_metrics": mean_metrics, "std_test_metrics": std_metrics,
+    })
+    print("Mean test metrics | " + " | ".join(
+        f"{name}={value:.6g}" for name, value in mean_metrics.items()
+    ), flush=True)
+    print(f"Test results: {result_path}", flush=True)
+
+
 def main():
     args = parse_args()
     # Normalize numeric types so the same settings also reuse the same cached trial.
@@ -131,6 +182,7 @@ def main():
         mining_grid - {BASELINE[3:]}
     )
     max_final = (2 + args.final_top) * len(args.final_seeds)
+    run_test = args.stage == "all" and args.test_after_train
     if args.dry_run:
         for params in grid:
             print(dict(zip(PARAMETERS, params)))
@@ -139,9 +191,11 @@ def main():
             print(f"Mining: up to {max_mining} runs x {args.screen_epochs} epochs")
         if args.stage == "all":
             print(f"Confirmation: up to {max_final} runs x {args.final_epochs} epochs")
+        if run_test:
+            print(f"Test: {len(args.final_seeds)} seeds of the validation winner")
         return
 
-    for split in ("train", "val"):
+    for split in (("train", "val", "test") if run_test else ("train", "val")):
         split_dir = args.data_dir / split
         if not split_dir.is_dir() or not any(split_dir.iterdir()):
             raise SystemExit(f"Missing or empty data split: {split_dir}")
@@ -183,6 +237,8 @@ def main():
     summary.sort(key=lambda row: -row["mean_val_iou"])
     write_json(args.run_root / "confirmation.json", summary)
     print(f"Confirmation results: {args.run_root / 'confirmation.json'}", flush=True)
+    if run_test:
+        test_winner(args, summary[0])
 
 
 if __name__ == "__main__":
