@@ -94,7 +94,7 @@ def run_trial(args, phase, params, epochs, seed):
             return result
 
     command = [sys.executable, "-u", str(ROOT / "train.py"),
-               "--run_root", str(directory), "--run_name", phase]
+               "--run_root", str(directory), "--run_name", phase, "--no-test_after_train"]
     for name, value in options.items():
         command.extend((f"--{name}", str(value)))
     if args.gpu is not None:

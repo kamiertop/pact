@@ -27,6 +27,8 @@ def parse(mode):
     if mode == "train":
         parser.add_argument("--seed", type=int, default=37)
         parser.add_argument("--epochs", type=int, default=50)
+        parser.add_argument("--test_after_train", action=argparse.BooleanOptionalAction, default=True,
+                            help="evaluate the best validation checkpoint on the test split")
         parser.add_argument("--early_stopping_patience", type=int, default=0,
                             help="stop after this many epochs without a new best validation IoU (0 disables)")
         parser.add_argument("--lr", type=float, default=0.001)

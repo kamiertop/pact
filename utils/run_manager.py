@@ -2,14 +2,27 @@
 from datetime import datetime
 import json
 from pathlib import Path
+import re
+
+
+RUN_TIMESTAMP = re.compile(r"_(\d{8}_\d{4})(?:\d{2}_\d{6}|_\d+)?$")
 
 
 class RunManager:
     def __init__(self, root, name, config):
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.run_dir = Path(root) / f"train_{name}_{stamp}"
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        base = Path(root) / f"train_{name}_{stamp}"
+        self.run_dir = base
+        suffix = 2
+        while True:
+            try:
+                self.run_dir.mkdir(parents=True)
+                break
+            except FileExistsError:
+                self.run_dir = base.with_name(f"{base.name}_{suffix}")
+                suffix += 1
         self.ckpt_dir = self.run_dir / "checkpoints"
-        self.ckpt_dir.mkdir(parents=True)
+        self.ckpt_dir.mkdir()
         self.log_path = self.run_dir / "metrics.jsonl"
         self.log_path.touch()
         (self.run_dir / "config.json").write_text(
@@ -35,4 +48,11 @@ def resolve_checkpoint(root, run_dir=None):
     candidates = [p for p in base.glob(pattern) if p.is_file()]
     if not candidates:
         raise ValueError(f"No best-IoU checkpoint found in {base}. Train first or select an existing run with --run_dir.")
-    return max(candidates, key=lambda p: (p.parent.parent.name[-22:], p.stat().st_mtime_ns, str(p)))
+    def sort_key(checkpoint):
+        directory = checkpoint.parent.parent
+        stamp = RUN_TIMESTAMP.search(directory.name)
+        config = directory / "config.json"
+        started = config.stat().st_mtime_ns if config.is_file() else checkpoint.stat().st_mtime_ns
+        return (stamp[1] if stamp else "", started, checkpoint.stat().st_mtime_ns, str(checkpoint))
+
+    return max(candidates, key=sort_key)

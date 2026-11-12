@@ -121,11 +121,15 @@ uv run python -c "import torch, spconv.pytorch, HAIS_OP; print(torch.__version__
 uv run python train.py --data_dir /path/to/ev-uav --gpu 0 --run_name pact_s37
 ```
 
-Each training run gets its own `runs/train_<name>_<timestamp>/` directory:
+Each training run gets its own `runs/train_<name>_YYYYMMDD_HHMM/` directory.
+Runs with the same name started in the same minute get a numeric suffix.
 `config.json` records the effective arguments, `metrics.jsonl` records batch
 and epoch metrics, including `epoch_seconds` for training, validation, and
 checkpoint writes. `checkpoints/` holds the best mean training loss and
 best validation IoU weights. Use `--run_root` to change the output root.
+Direct training evaluates the best validation checkpoint on the test split
+after training or early stopping and writes `test_metrics.json` in the run
+directory. Pass `--no-test_after_train` to skip this evaluation.
 
 ### R1 auxiliary losses
 

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import os
 import random
+import sys
+from pathlib import Path
 from time import perf_counter
 
 from utils.args import parse
@@ -208,3 +210,14 @@ if __name__ == '__main__':
               f"time={epoch_seconds:.2f}s{stop_message}", flush=True)
         if early_stopped:
             break
+
+    if cfg.test_after_train:
+        run_dir = run.run_dir.resolve()
+        print(f"Testing the best validation checkpoint in {run_dir}", flush=True)
+        command = [
+            sys.executable, "-u", str(Path(__file__).resolve().with_name("test.py")),
+            "--split", "test", "--run_dir", str(run_dir), "--batch_size", "1",
+            "--output_json", str(run_dir / "test_metrics.json"),
+        ]
+        # Replace the training process so testing starts with a fresh CUDA context.
+        os.execv(sys.executable, command)
