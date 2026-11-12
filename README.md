@@ -149,14 +149,20 @@ uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0 --dry_run
 uv run python scripts/sweep_r1.py --data_dir /path/to/ev-uav --gpu 0
 ```
 
-The default search screens 27 weight combinations for 50 epochs each, then varies
+The default search screens 27 weight combinations for up to 50 epochs each, then varies
 the mining ratio and minimum quota for the two highest-ranking configurations
-with hard-background BCE enabled, also for 50 epochs each. The sweep prints
+with hard-background BCE enabled, also for up to 50 epochs each. The sweep prints
 one line per epoch, including elapsed time, and saves full output to each
 trial's `train.log`. It trains the native PACT baseline, the
 EV-UAV reference weights, and the two highest-ranking remaining settings for
-50 epochs each with seeds 37, 42 and 73. All stages use PACT's optimizer and
+up to 50 epochs each with seeds 37, 42 and 73. All stages use PACT's optimizer and
 schedule and rank on validation IoU at threshold 0.9 by default.
+
+All sweep stages stop a trial after 10 consecutive epochs without a new best
+validation IoU. Set `--early_stopping_patience N` to change the wait or set it to
+`0` to run the full epoch budget. The sweep records `completed_epochs` and
+`early_stopped` in its results. Direct `train.py` runs support the same option
+and default to running the full epoch budget.
 
 Use `--stage weights` to run just the weight grid or `--stage mining` to finish
 screening. Rerunning the same command reuses completed trials with available

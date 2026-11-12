@@ -28,6 +28,8 @@ def parse_args():
     parser.add_argument("--prediction_thresh", type=float, default=0.9)
     parser.add_argument("--screen_epochs", type=int, default=50)
     parser.add_argument("--final_epochs", type=int, default=50)
+    parser.add_argument("--early_stopping_patience", type=int, default=10,
+                        help="stop after this many epochs without a new best validation IoU (0 disables)")
     parser.add_argument("--screen_seed", type=int, default=37)
     parser.add_argument("--final_seeds", nargs="+", type=int, default=[37, 42, 73])
     parser.add_argument("--risk_weights", nargs="+", type=float, default=[0, 0.05, 0.1])
@@ -48,6 +50,8 @@ def parse_args():
         parser.error("epochs, batch size and maximum event count must be positive")
     if args.mining_top < 0 or args.final_top < 0:
         parser.error("candidate counts must be nonnegative")
+    if args.early_stopping_patience < 0:
+        parser.error("--early_stopping_patience must be nonnegative")
     weights = args.risk_weights + args.iou_weights + args.hardneg_weights
     if any(not math.isfinite(w) or w < 0 for w in weights):
         parser.error("weights must be finite and nonnegative")
@@ -76,6 +80,8 @@ def run_trial(args, phase, params, epochs, seed):
         "prediction_thresh": args.prediction_thresh, "epochs": epochs, "seed": seed,
         **config,
     }
+    if args.early_stopping_patience:
+        options["early_stopping_patience"] = args.early_stopping_patience
     trial_id = hashlib.sha256(json.dumps(options, sort_keys=True).encode()).hexdigest()[:16]
     directory = args.run_root.resolve() / phase / trial_id
     directory.mkdir(parents=True, exist_ok=True)
@@ -83,6 +89,8 @@ def run_trial(args, phase, params, epochs, seed):
     if result_path.is_file():
         result = json.loads(result_path.read_text(encoding="utf-8"))
         if Path(result["checkpoint"]).is_file():
+            result.setdefault("completed_epochs", result["epochs"])
+            result.setdefault("early_stopped", False)
             return result
 
     command = [sys.executable, "-u", str(ROOT / "train.py"),
@@ -114,18 +122,29 @@ def run_trial(args, phase, params, epochs, seed):
     with (run_dir / "metrics.jsonl").open(encoding="utf-8") as stream:
         records = [record for line in stream if "val_mIoU" in (record := json.loads(line))]
     checkpoint = run_dir / "checkpoints" / f"best_iou_seed{seed}.pt"
-    if (len(records) != epochs or not checkpoint.is_file()
+    completed = len(records)
+    if (not 0 < completed <= epochs or not checkpoint.is_file()
+            or any(row["epoch"] != index for index, row in enumerate(records))
             or any(not math.isfinite(row["val_mIoU"]) for row in records)):
         raise SystemExit(f"Missing checkpoint or incomplete validation metrics. See {log}")
 
     best = max(records, key=lambda row: row["val_mIoU"])
+    early_stopped = completed < epochs
+    if early_stopped and (
+        records[-1].get("early_stopped") is not True
+        or args.early_stopping_patience == 0
+        or completed - 1 - best["epoch"] != args.early_stopping_patience
+    ):
+        raise SystemExit(f"Training ended before the epoch limit without a valid early stop. See {log}")
     result = {
         "params": config, "seed": seed, "epochs": epochs,
+        "completed_epochs": completed, "early_stopped": early_stopped,
         "val_iou": best["val_mIoU"], "best_epoch": best["epoch"] + 1,
         "run_dir": str(run_dir), "checkpoint": str(checkpoint),
     }
     write_json(result_path, result)
-    print(f"  best val IoU={result['val_iou']:.4f} at epoch {result['best_epoch']}", flush=True)
+    print(f"  best val IoU={result['val_iou']:.4f} at epoch {result['best_epoch']} "
+          f"({completed}/{epochs} epochs completed)", flush=True)
     return result
 
 
@@ -193,6 +212,7 @@ def main():
             print(f"Confirmation: up to {max_final} runs x {args.final_epochs} epochs")
         if run_test:
             print(f"Test: {len(args.final_seeds)} seeds of the validation winner")
+        print(f"Early stopping patience: {args.early_stopping_patience} (0 disables)")
         return
 
     for split in (("train", "val", "test") if run_test else ("train", "val")):

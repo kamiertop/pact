@@ -75,6 +75,7 @@ if __name__ == '__main__':
 
     best_loss = float("inf")
     best_iou = float("-inf")
+    best_iou_epoch = -1
 
     # --------- evaluator ----------
     evaluter = evalute(cfg, roc=False)
@@ -187,13 +188,23 @@ if __name__ == '__main__':
         iou = float(evaluter.evaluate_semantic_segmantation_miou(cfg.prediction_thresh))
         if iou > best_iou:
             best_iou = iou
+            best_iou_epoch = epoch
             run.save_checkpoint(net, f"best_iou_seed{seed}.pt")
+        patience = cfg.early_stopping_patience
+        early_stopped = (
+            patience > 0 and best_iou_epoch >= 0
+            and epoch - best_iou_epoch >= patience and epoch + 1 < cfg.epochs
+        )
 
         if device.type == "cuda":
             torch.cuda.synchronize(device)
         epoch_seconds = perf_counter() - epoch_started
         run.log_metric(epoch, loss=mean_loss, lr=lr, val_mIoU=iou,
-                       best_val_mIoU=best_iou, epoch_seconds=epoch_seconds)
+                       best_val_mIoU=best_iou, epoch_seconds=epoch_seconds,
+                       early_stopped=early_stopped)
+        stop_message = f" | early stop ({patience} epochs without improvement)" if early_stopped else ""
         print(f"Epoch {epoch + 1}/{cfg.epochs} | loss={mean_loss:.6f} | "
               f"lr={lr:.3g} | val IoU={iou:.4f} | best IoU={best_iou:.4f} | "
-              f"time={epoch_seconds:.2f}s", flush=True)
+              f"time={epoch_seconds:.2f}s{stop_message}", flush=True)
+        if early_stopped:
+            break

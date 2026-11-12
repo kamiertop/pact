@@ -27,6 +27,8 @@ def parse(mode):
     if mode == "train":
         parser.add_argument("--seed", type=int, default=37)
         parser.add_argument("--epochs", type=int, default=50)
+        parser.add_argument("--early_stopping_patience", type=int, default=0,
+                            help="stop after this many epochs without a new best validation IoU (0 disables)")
         parser.add_argument("--lr", type=float, default=0.001)
         parser.add_argument("--k", type=int, default=3)
         parser.add_argument("--t", type=int, default=5)
@@ -55,6 +57,8 @@ def parse(mode):
                             or cfg.run_name in {".", ".."}):
         parser.error("--run_name must be a single directory name")
     if mode == "train":
+        if cfg.early_stopping_patience < 0:
+            parser.error("--early_stopping_patience must be nonnegative")
         for name in ("risk_weight", "iou_weight", "hardneg_weight"):
             weight = getattr(cfg, name)
             if not math.isfinite(weight) or weight < 0:
