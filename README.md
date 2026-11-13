@@ -194,6 +194,24 @@ Testing reuses the run's model and data settings from `config.json`. Explicit
 arguments (such as `--data_dir`) override those settings. Use `--split val` for
 validation.
 
+### Original PACT vs. the three fixed R1 finalists
+
+```bash
+uv run python scripts/compare_pact.py --data_dir /path/to/ev-uav --gpu 0
+```
+
+This runs the original loss (all R1 weights zero) and the three selected R1
+settings (ratio/minimum: 3/1024, 6/64, 1/1024) on seeds 37, 42 and 73. All
+groups use the same 50-epoch limit, early stopping patience of 10, and 0.9
+prediction threshold by default. Pass `--early_stopping_patience 0` for
+exactly 50 epochs. Each run is tested using its best validation IoU checkpoint,
+with evaluation batch size 1 for Pd/Fa. Use `--dry_run` to preview the plan.
+
+Results are saved to `runs/pact_comparison/comparison.json`, with per-seed
+scores, mean and sample standard deviation, and paired IoU differences from
+original PACT. Re-running with the same output root reuses completed training
+trials; use a fresh `--run_root` after changing code or data.
+
 ## Checkpoints
 
 Pretrained checkpoints are available below.

@@ -87,3 +87,6 @@ mlartifacts/
 
 # Local experiment runs
 /runs/
+test_ranking.json
+
+*.tar.gz
