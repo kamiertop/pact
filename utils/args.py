@@ -50,6 +50,8 @@ def parse(mode):
         parser.add_argument("--run_dir", help="use this run's best validation IoU checkpoint")
         parser.add_argument("--split", choices=("val", "test"), default="test")
         parser.add_argument("--output_json", type=Path, help="write evaluation metrics as JSON")
+        parser.add_argument("--per_sequence", action="store_true",
+                            help="include per-sequence foreground counts in the JSON output")
         parser.add_argument("--pd_detT", type=int, default=50, help="Pd/Fa window in ms")
         parser.add_argument("--correct_thresh", type=float, default=0.0001)
         parser.add_argument("--roc", action=argparse.BooleanOptionalAction, default=True,

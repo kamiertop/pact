@@ -24,6 +24,7 @@ if __name__ == "__main__":
         dataset, batch_size=cfg.batch_size, collate_fn=dataset.custom_collate,
     )
     evaluator = evalute(cfg, roc=cfg.roc)
+    sequences = []
     with torch.no_grad():
         for sample, events in enumerate(loader):
             preds, _, _, _ = net(events["voxel_ev"])
@@ -31,6 +32,18 @@ if __name__ == "__main__":
             preds = preds[p2v_map].reshape(-1).cpu()
             labels = events["seg_label_ev"].float().cpu()
             evaluator.matches[str(sample)] = {"seg_pred": preds, "seg_gt": labels}
+            if cfg.per_sequence:
+                predicted = preds >= cfg.prediction_thresh
+                foreground = labels == 1
+                for index, name in enumerate(events["name"]):
+                    mask = events["locs"][:, 0] == index
+                    positive, target = predicted[mask], foreground[mask]
+                    sequences.append({
+                        "sequence": name, "events": target.numel(),
+                        "tp": int((positive & target).sum()),
+                        "fp": int((positive & ~target).sum()),
+                        "fn": int((~positive & target).sum()),
+                    })
             if cfg.roc:
                 locs = events["locs"].float()
                 evaluator.roc_update(
@@ -45,6 +58,10 @@ if __name__ == "__main__":
         pd, fa = evaluator.cal_roc()
         metrics.update(pd=float(pd), fa=float(fa))
     if cfg.output_json is not None:
-        cfg.output_json.write_text(json.dumps(metrics, indent=2, allow_nan=False) + "\n",
+        report = dict(metrics)
+        if cfg.per_sequence:
+            report.update({key: sum(row[key] for row in sequences) for key in ("tp", "fp", "fn")})
+            report["per_sequence"] = sequences
+        cfg.output_json.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n",
                                    encoding="utf-8")
     print(",".join(f"{name}:{value}" for name, value in metrics.items()))
